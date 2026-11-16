@@ -30,6 +30,9 @@ B-CUBE 디자인톤에서 기획한 프로젝트를 발표 자료와 프로젝�
 ```text
 .
 ├── DESIGN.md                 # 결과물 작성 지침
+├── netlify.toml              # Netlify 빌드 및 공개 디렉토리 설정
+├── scripts/build_netlify.py  # 배포 파일과 도메인별 라우팅 생성
+├── tests/                    # 도메인 등록 동작 테스트
 ├── designton_pdfs/           # 원본 PDF와 프로젝트 목록 CSV
 └── out_spas/
     └── <서브도메인 후보>/
@@ -52,6 +55,44 @@ python3 -m http.server 8000
 브라우저에서 `http://localhost:8000/out_spas/`에 접속해 프로젝트를 선택하거나, 예를 들어 `http://localhost:8000/out_spas/masil-on/`으로 바로 열 수 있습니다. 폰트는 CDN을 사용하므로 인터넷 연결이 없으면 대체 글꼴로 표시됩니다.
 
 각 페이지는 프로젝트를 설명하는 정적 결과물입니다. 소개된 앱의 회원가입, 매칭, 예약 등은 실제로 동작하는 서비스 기능이 아닙니다. 작성 및 구현 기준은 [DESIGN.md](DESIGN.md)를 참고하세요.
+
+## 개발 및 빌드
+
+필요한 도구는 Python 3이며, 추가 패키지를 설치할 필요는 없습니다. 프로젝트 페이지는 위의 정적 서버로 바로 확인할 수 있습니다. Netlify 배포 파일을 로컬에서 만들려면 저장소 루트에서 다음 명령을 실행합니다.
+
+```sh
+python3 scripts/build_netlify.py
+```
+
+이 명령은 `out_spas/`를 `.netlify-publish/`로 복사하고, 각 서브도메인을 해당 프로젝트로 연결하는 `_redirects` 파일을 생성합니다. `.netlify-publish/`는 생성 결과물이므로 Git에 포함하지 않습니다. 로컬에서 일반적으로 실행할 때는 Netlify API를 호출하거나 도메인을 등록하지 않습니다. 기존 `.netlify-publish/`는 실행할 때마다 다시 생성됩니다.
+
+도메인 등록 로직의 테스트는 다음과 같이 실행합니다. 테스트는 모의 API 응답을 사용하며 실제 도메인 설정을 변경하지 않습니다.
+
+```sh
+python3 -m unittest discover -s tests -v
+```
+
+## Netlify 배포 설정
+
+이 저장소는 Netlify 프로젝트 하나에서 `out_spas/<프로젝트명>/`을 `https://<프로젝트명>.b-cube.kr/`로 제공하도록 구성되어 있습니다.
+
+1. Netlify에서 Git 저장소를 연결하고 프로젝트를 생성합니다. Base directory는 비워 저장소 루트를 사용합니다. [netlify.toml](netlify.toml)이 빌드 명령 `python3 scripts/build_netlify.py`와 공개 디렉토리 `.netlify-publish`를 설정합니다.
+2. Netlify 계정의 **User settings > Applications > Personal access tokens**에서 토큰을 생성합니다. 토큰을 발급한 계정은 해당 Netlify 팀과 프로젝트의 도메인을 조회·변경할 권한이 있어야 합니다. 토큰을 생성할 때 해당 팀에 대한 접근 권한을 부여합니다. [Netlify 토큰 안내](https://docs.netlify.com/accounts-and-billing/user-settings/)
+3. Netlify 프로젝트의 **Project configuration > Environment variables**에 다음 값을 추가합니다. 선택할 수 있다면 비밀 값으로 표시하고 범위에 **Builds**를 포함합니다. 토큰 값은 저장소, `netlify.toml`, PR, 빌드 로그에 기록하지 않습니다. [환경 변수 설정 안내](https://docs.netlify.com/build/environment-variables/get-started/)
+
+   | 변수 | 설정 방법 | 용도 |
+   | --- | --- | --- |
+   | `NETLIFY_DOMAIN_TOKEN` | 개발자가 Netlify 환경 변수에 비밀 값으로 등록 | 프로젝트의 도메인 별칭 조회 및 등록 |
+   | `SITE_ID` | Netlify가 빌드 시 자동 제공 | 도메인을 등록할 프로젝트 식별 |
+   | `NETLIFY` | Netlify가 빌드 시 자동 제공 | Netlify 빌드에서 도메인 등록 실행 여부 판단 |
+
+   별도의 앱 비밀키나 DNS API 키는 이 빌드에 필요하지 않습니다. 토큰을 설정하거나 변경한 뒤 새 빌드를 실행합니다. 토큰이 없거나 권한이 부족하면 Netlify 빌드는 실패합니다.
+4. 빌드 시 `out_spas/`의 모든 프로젝트 도메인을 확인하고 빠진 도메인만 Netlify 별칭에 추가합니다. 기존 기본 도메인과 별칭은 유지하며 디렉토리를 삭제해도 등록된 별칭은 자동 삭제하지 않습니다. 새 프로젝트에는 소문자·숫자·하이픈으로 된 DNS 레이블 이름과 `index.html`이 필요합니다.
+5. DNS 레코드 및 네임서버는 별도로 관리합니다. 외부 DNS를 사용한다면 각 서브도메인을 해당 Netlify 프로젝트의 `.netlify.app` 주소로 연결하고 HTTPS 인증서 발급을 확인합니다. 빌드 스크립트는 DNS API를 호출하지 않습니다. Netlify DNS를 사용하면 Netlify가 도메인 연결에 따라 DNS 레코드를 자동 생성할 수 있습니다. [외부 DNS 설정](https://docs.netlify.com/manage/domains/configure-domains/configure-external-dns/)
+
+**프리뷰와 브랜치 빌드를 포함한 모든 Netlify 빌드가 실제 프로젝트의 도메인 설정을 변경합니다.** 각 빌드 컨텍스트에 토큰이 없으면 해당 빌드는 실패합니다. 신뢰할 수 없는 PR에서 비밀 값이 노출되거나 도메인이 변경되지 않도록 Netlify의 untrusted deploy 정책을 설정하고, 비밀을 제공하는 코드를 검토하세요. 동시에 여러 빌드나 관리자가 별칭 목록을 변경하면 덮어쓰기가 발생할 수 있으므로 변경을 직렬화하고 결과를 확인해야 합니다. 빌드 중 등록된 도메인은 이후 배포에 실패해도 자동으로 취소되지 않습니다.
+
+배포 후에는 각 도메인의 페이지와 이미지, HTTPS, 존재하지 않는 파일의 404 응답을 확인합니다. `.netlify-publish/`에는 각 프로젝트의 `README.md`와 `DESIGN_RULE.md`도 복사되어 공개될 수 있습니다. 상세 운영 방안은 [DESIGN.md](DESIGN.md)의 Netlify 호스팅 섹션을 참고하세요.
 
 ## 라이선스
 

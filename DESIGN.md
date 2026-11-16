@@ -34,8 +34,8 @@
 ### 권장 설정: 단일 프로젝트와 도메인별 rewrite
 
 1. 저장소를 Netlify 프로젝트 하나에 연결하고 Base directory는 비워 둔다. 저장소의 `netlify.toml`이 빌드 명령 `python3 scripts/build_netlify.py`와 Publish directory `.netlify-publish`를 지정한다. 빌드는 `out_spas`를 해당 디렉토리로 복사하므로 배포된 `/a-chedular/index.html`은 저장소의 `out_spas/a-chedular/index.html`에 해당한다.
-2. 프로젝트의 Domain management에 `a-chedular.b-cube.kr` 등 각 서브도메인을 같은 프로젝트의 사용자 지정 도메인 또는 도메인 별칭으로 등록한다. Netlify는 [사이트 하나에 여러 도메인 별칭](https://docs.netlify.com/manage/domains/configure-domains/add-a-domain-alias/)을 지원하며 50개 이하를 권장한다. 현재 디렉토리는 18개다.
-3. 외부 DNS를 사용하는 경우 각 서브도메인을 같은 프로젝트의 `<프로젝트명>.netlify.app`에 CNAME으로 연결한다. 도메인을 Netlify에 등록한 후 DNS를 설정하고, Netlify DNS 사용 시에는 해당 관리 방식에 따른다. [외부 DNS 설정](https://docs.netlify.com/manage/domains/configure-domains/configure-external-dns/)
+2. Netlify 프로젝트의 환경 변수에 도메인 관리 권한이 있는 액세스 토큰을 `NETLIFY_DOMAIN_TOKEN`으로 등록한다. Builds 범위와 실행할 모든 빌드 컨텍스트에서 사용 가능하게 설정하고 비밀 값으로 관리한다. `SITE_ID`와 `NETLIFY`는 Netlify가 빌드에 제공한다. 스크립트는 빌드마다 API로 기존 도메인을 조회하여 빠진 프로젝트 도메인만 별칭으로 추가하고 결과를 확인한다. 기본 도메인과 기존 별칭은 유지하며, 삭제된 프로젝트의 도메인도 자동 삭제하지 않는다. 토큰 또는 API 오류 시 빌드는 실패한다. Netlify는 [별칭 50개 이하](https://docs.netlify.com/manage/domains/configure-domains/add-a-domain-alias/)를 권장한다.
+3. DNS 레코드와 네임서버 설정은 별도 운영 작업이다. 이 스크립트는 DNS API를 호출하지 않는다. 외부 DNS를 사용한다면 각 서브도메인을 같은 프로젝트의 `<프로젝트명>.netlify.app`에 CNAME으로 연결해야 한다. Netlify DNS를 사용한다면 도메인 연결에 따라 Netlify가 DNS 레코드를 자동 생성할 수 있다. [외부 DNS 설정](https://docs.netlify.com/manage/domains/configure-domains/configure-external-dns/), [Netlify DNS 레코드](https://docs.netlify.com/manage/domains/configure-domains/dns-records/)
 4. 빌드 스크립트는 `out_spas`의 프로젝트 디렉토리를 읽어 `.netlify-publish/_redirects`에 도메인별 규칙을 생성한다. 예를 들어 `a-chedular`에 대해 아래 규칙이 생성된다.
 
 ```text
@@ -45,9 +45,11 @@ https://a-chedular.b-cube.kr/* /a-chedular/:splat 200!
 
 루트 규칙을 먼저 두고 나머지 경로를 `:splat`으로 전달한다. `200!`은 공개 디렉토리에 같은 요청 경로의 파일이 있어도 rewrite를 적용한다. Netlify는 첫 번째로 일치하는 규칙을 사용하므로 더 구체적인 규칙을 앞에 둔다. Netlify의 HTTPS 강제를 활성화해야 한다. fragment는 브라우저에서 처리되며 서버로 전송되지 않는다. 배포 후 루트와 파일 경로, 누락 파일에 대해 실제 동작을 확인한다.
 
-5. 새 프로젝트를 추가할 때는 유효한 소문자 DNS 레이블 이름의 디렉토리와 `index.html`을 추가한다. 다음 배포 시 규칙이 자동 생성되며, 같은 Netlify 프로젝트의 도메인 등록과 DNS 및 HTTPS 설정은 별도로 필요하다. 잘못된 이름이나 누락된 `index.html`이 있으면 빌드가 실패한다.
+5. 새 프로젝트를 추가할 때는 유효한 소문자 DNS 레이블 이름의 디렉토리와 `index.html`을 추가한다. 다음 Netlify 빌드 시 규칙과 도메인 별칭이 자동 추가된다. DNS 및 HTTPS 준비는 별도 확인해야 한다. 잘못된 이름이나 누락된 `index.html`이 있으면 빌드가 실패한다.
 
-로컬에서 `python3 scripts/build_netlify.py`를 실행하면 배포 파일과 규칙을 확인할 수 있다. 생성된 `.netlify-publish/`는 Git에서 제외된다. Netlify 빌드마다 규칙을 생성하므로 GitHub Actions의 자동 커밋은 필요하지 않다.
+로컬에서 `python3 scripts/build_netlify.py`를 실행하면 배포 파일과 규칙을 확인할 수 있다. 로컬에서는 도메인을 변경하지 않는다. 생성된 `.netlify-publish/`는 Git에서 제외된다. Netlify 빌드마다 규칙을 생성하므로 GitHub Actions의 자동 커밋은 필요하지 않다.
+
+도메인 등록은 프리뷰와 브랜치 배포를 포함한 모든 Netlify 빌드에서 실제 사이트 설정을 변경한다. 신뢰할 수 없는 PR 코드가 토큰을 사용할 수 없도록 Netlify의 untrusted deploy 정책과 비밀 변수 접근 범위를 관리한다. 비밀 변수가 제공되지 않는 빌드는 실패한다. API의 별칭 목록 갱신은 다른 동시 빌드나 수동 변경과 원자적으로 병합되지 않으므로 도메인 설정 변경을 직렬화하고, 동시 작업이 있었다면 Domain management에서 결과를 확인한 뒤 빌드를 다시 실행한다. 빌드 중 등록된 도메인은 이후 배포 실패 시 자동 롤백되지 않는다.
 
 와일드카드 DNS 또는 인증서만으로 모든 서브도메인이 이 Netlify 프로젝트에 자동 연결된다고 가정하지 않는다. 자동 연결을 원하면 해당 계정의 지원 여부와 조건을 별도 확인해야 한다. [Netlify HTTPS 문서](https://docs.netlify.com/manage/domains/secure-domains-with-https/https-ssl/)
 
