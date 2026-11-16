@@ -2,15 +2,72 @@
 """Build the static Netlify publish directory and host-specific rewrites."""
 
 from pathlib import Path
+import json
+import os
 import re
 import shutil
 import sys
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "out_spas"
 PUBLISH = ROOT / ".netlify-publish"
 SLUG = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
+
+
+def register_domains(projects):
+    """Add missing aliases without removing domains already assigned to the site."""
+    site_id = os.environ.get("SITE_ID")
+    token = os.environ.get("NETLIFY_DOMAIN_TOKEN")
+    if not site_id or not token:
+        raise ValueError("SITE_ID and NETLIFY_DOMAIN_TOKEN are required on Netlify")
+
+    url = f"https://api.netlify.com/api/v1/sites/{quote(site_id, safe='')}"
+
+    def request(method, body=None):
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        req = Request(url, data=data, method=method, headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        })
+        try:
+            with urlopen(req, timeout=30) as response:
+                return json.load(response)
+        except HTTPError as error:
+            raise ValueError(f"Netlify API {method} failed with HTTP {error.code}") from None
+        except (URLError, TimeoutError, json.JSONDecodeError) as error:
+            raise ValueError(f"Netlify API {method} failed: {type(error).__name__}") from None
+
+    site = request("GET")
+    if not isinstance(site, dict) or not isinstance(site.get("domain_aliases"), list):
+        raise ValueError("Netlify API response is missing the domain alias list")
+    aliases = site["domain_aliases"]
+    if not all(isinstance(alias, str) for alias in aliases):
+        raise ValueError("Netlify API returned an invalid domain alias list")
+    existing = {alias.lower().rstrip(".") for alias in aliases}
+    primary = site.get("custom_domain")
+    if isinstance(primary, str):
+        existing.add(primary.lower().rstrip("."))
+    missing = [f"{project.name}.b-cube.kr" for project in projects
+               if f"{project.name}.b-cube.kr" not in existing]
+    if not missing:
+        print("All project domains are already registered")
+        return
+    request("PATCH", {"domain_aliases": aliases + missing})
+    updated = request("GET")
+    updated_aliases = updated.get("domain_aliases") if isinstance(updated, dict) else None
+    if not isinstance(updated_aliases, list) or not all(isinstance(alias, str) for alias in updated_aliases):
+        raise ValueError("Netlify API returned an invalid domain alias list after update")
+    updated_domains = {alias.lower().rstrip(".") for alias in updated_aliases}
+    if isinstance(updated.get("custom_domain"), str):
+        updated_domains.add(updated["custom_domain"].lower().rstrip("."))
+    if not existing.union(missing).issubset(updated_domains):
+        raise ValueError("Netlify domain update did not retain all existing and requested domains")
+    print(f"Registered {len(missing)} project domains")
 
 
 def main():
@@ -36,6 +93,8 @@ def main():
         rules.append(f"{host}/* /{name}/:splat 200!")
     (PUBLISH / "_redirects").write_text("\n".join(rules) + "\n", encoding="utf-8")
     print(f"Prepared {len(projects)} projects in {PUBLISH.relative_to(ROOT)}")
+    if os.environ.get("NETLIFY") == "true":
+        register_domains(projects)
 
 
 if __name__ == "__main__":
